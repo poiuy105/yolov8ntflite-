@@ -2,9 +2,9 @@ package com.example.cameradetect
 
 import android.content.Context
 import android.util.Log
+import com.hivemq.client.mqtt.datatypes.MqttQos
 import com.hivemq.client.mqtt.mqtt3.Mqtt3AsyncClient
 import com.hivemq.client.mqtt.mqtt3.Mqtt3Client
-import com.hivemq.client.mqtt.mqtt3.Mqtt3Qos
 import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
