@@ -4,7 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.hivemq.client.mqtt.MqttGlobalPublishFilter
 import com.hivemq.client.mqtt.mqtt3.Mqtt3AsyncClient
-import com.hivemq.client.mqtt.mqtt3.Mqtt3ClientBuilder
+import com.hivemq.client.mqtt.mqtt3.Mqtt3Qos
 import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -35,7 +35,7 @@ class MqttManager(private val context: Context) {
             try {
                 disconnect()
 
-                val builder: Mqtt3ClientBuilder = Mqtt3Client.builder()
+                val builder = Mqtt3AsyncClient.builder()
                     .identifier(clientId)
                     .serverHost(brokerHost)
                     .serverPort(brokerPort)
@@ -109,7 +109,7 @@ class MqttManager(private val context: Context) {
                 mqttClient?.publishWith()
                     ?.topic(topic)
                     ?.payload(json.toString().toByteArray())
-                    ?.qos(com.hivemq.client.mqtt.mqtt3.MqttQos.AT_LEAST_ONCE)
+                    ?.qos(MqttQos.AT_LEAST_ONCE)
                     ?.send()
             } catch (e: Exception) {
                 Log.e("MqttManager", "Publish error", e)
