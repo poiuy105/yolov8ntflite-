@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory app:title="MQTT配置">
+
+        <EditTextPreference
+            app:key="mqtt_broker"
+            app:title="Broker地址"
+            app:defaultValue="192.168.1.100"
+            app:useSimpleSummaryProvider="true" />
+
+        <EditTextPreference
+            app:key="mqtt_port"
+            app:title="端口"
+            app:defaultValue="1883"
+            app:useSimpleSummaryProvider="true" />
+
+        <EditTextPreference
+            app:key="mqtt_topic"
+            app:title="Topic"
+            app:defaultValue="home/camera/person_count"
+            app:useSimpleSummaryProvider="true" />
+
+        <EditTextPreference
+            app:key="mqtt_username"
+            app:title="用户名 (可选)"
+            app:defaultValue=""
+            app:useSimpleSummaryProvider="true" />
+
+        <EditTextPreference
+            app:key="mqtt_password"
+            app:title="密码 (可选)"
+            app:defaultValue=""
+            app:useSimpleSummaryProvider="true" />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>
