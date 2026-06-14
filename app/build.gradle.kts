@@ -36,6 +36,11 @@ android {
     buildFeatures {
         viewBinding = true
     }
+    packaging {
+        resources {
+            excludes += listOf("META-INF/INDEX.LIST", "META-INF/io.netty.versions.properties")
+        }
+    }
 }
 
 dependencies {
@@ -59,7 +64,7 @@ dependencies {
     implementation("org.tensorflow:tensorflow-lite-gpu-api:2.14.0")
 
     // MQTT (HiveMQ client, modern and Android-compatible)
-    implementation("com.hivemq:hivemq-mqtt-client:1.3.0")
+    implementation("com.hivemq:hivemq-mqtt-client:1.3.3")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")

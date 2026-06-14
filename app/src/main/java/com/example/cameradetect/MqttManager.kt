@@ -2,8 +2,8 @@ package com.example.cameradetect
 
 import android.content.Context
 import android.util.Log
-import com.hivemq.client.mqtt.MqttGlobalPublishFilter
 import com.hivemq.client.mqtt.mqtt3.Mqtt3AsyncClient
+import com.hivemq.client.mqtt.mqtt3.Mqtt3Client
 import com.hivemq.client.mqtt.mqtt3.Mqtt3Qos
 import kotlinx.coroutines.*
 import org.json.JSONArray
@@ -35,19 +35,19 @@ class MqttManager(private val context: Context) {
             try {
                 disconnect()
 
-                val builder = Mqtt3AsyncClient.builder()
+                val clientBuilder = Mqtt3Client.builder()
                     .identifier(clientId)
                     .serverHost(brokerHost)
                     .serverPort(brokerPort)
 
                 if (username.isNotEmpty()) {
-                    builder.simpleAuth()
+                    clientBuilder.simpleAuth()
                         .username(username)
                         .password(password.toByteArray())
                         .applySimpleAuth()
                 }
 
-                mqttClient = builder.buildAsync()
+                mqttClient = clientBuilder.buildAsync()
 
                 mqttClient?.connectWith()
                     ?.cleanSession(true)
