@@ -35,14 +35,7 @@ class SsdDetector(
     fun setup() {
         val model = FileUtil.loadMappedFile(context, modelPath)
         val options = Interpreter.Options()
-
-        val compatList = CompatibilityList()
-        if (compatList.isDelegateSupportedOnThisDevice) {
-            val delegateOptions = compatList.bestOptionsForThisDevice
-            options.addDelegate(GpuDelegate(delegateOptions))
-        } else {
-            options.setNumThreads(4)
-        }
+        options.setNumThreads(4)
 
         interpreter = Interpreter(model, options)
 

@@ -5,8 +5,6 @@ import android.graphics.Bitmap
 import android.os.SystemClock
 import org.tensorflow.lite.DataType
 import org.tensorflow.lite.Interpreter
-import org.tensorflow.lite.gpu.CompatibilityList
-import org.tensorflow.lite.gpu.GpuDelegate
 import org.tensorflow.lite.support.common.FileUtil
 import org.tensorflow.lite.support.image.ImageProcessor
 import org.tensorflow.lite.support.image.TensorImage
@@ -31,15 +29,7 @@ class DeepLabSegmenter(
     fun setup() {
         val model = FileUtil.loadMappedFile(context, modelPath)
         val options = Interpreter.Options()
-
-        val compatList = CompatibilityList()
-        if (compatList.isDelegateSupportedOnThisDevice) {
-            val delegateOptions = compatList.bestOptionsForThisDevice
-            options.addDelegate(GpuDelegate(delegateOptions))
-        } else {
-            options.setNumThreads(4)
-        }
-
+        options.setNumThreads(4)
         interpreter = Interpreter(model, options)
     }
 
@@ -53,10 +43,10 @@ class DeepLabSegmenter(
         val processedImage = imageProcessor.process(tensorImage)
         val imageBuffer = processedImage.buffer
 
-        val output = Array(1) { Array(inputSize) { IntArray(inputSize) } }
+        val output = Array(1) { Array(inputSize) { Array(inputSize) { FloatArray(numClasses) } } }
         interpreter?.run(imageBuffer, output)
 
-        val mask = output[0]
+        val mask = argmaxToMask(output[0])
         val boundingBoxes = extractPersonBoxes(mask)
         val inferenceTime = SystemClock.uptimeMillis() - startTime
 
@@ -68,6 +58,25 @@ class DeepLabSegmenter(
         }
 
         detectorListener.onDetect(boundingBoxes, inferenceTime)
+    }
+
+    private fun argmaxToMask(probs: Array<Array<FloatArray>>): Array<IntArray> {
+        val mask = Array(inputSize) { IntArray(inputSize) }
+        for (y in 0 until inputSize) {
+            for (x in 0 until inputSize) {
+                var maxIdx = 0
+                var maxVal = probs[y][x][0]
+                for (c in 1 until numClasses) {
+                    val v = probs[y][x][c]
+                    if (v > maxVal) {
+                        maxVal = v
+                        maxIdx = c
+                    }
+                }
+                mask[y][x] = maxIdx
+            }
+        }
+        return mask
     }
 
     private fun extractPersonBoxes(mask: Array<IntArray>): List<BoundingBox> {
