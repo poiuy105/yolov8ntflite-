@@ -19,12 +19,12 @@ class MqttManager(private val context: Context) {
     private var reconnectJob: Job? = null
     private var reconnectDelayMs = 1000L
 
-    var brokerHost: String = "192.168.1.100"
+    var brokerHost: String = "192.168.123.49"
     var brokerPort: Int = 1883
     var clientId: String = "camera_detect_${System.currentTimeMillis()}"
     var topic: String = "home/camera/person_count"
-    var username: String = ""
-    var password: String = ""
+    var username: String = "fnos"
+    var password: String = "fuckfnos"
 
     val isConnected: Boolean get() = _isConnected
 
@@ -65,6 +65,7 @@ class MqttManager(private val context: Context) {
                             Log.i("MqttManager", "Connected to MQTT broker")
                             _isConnected = true
                             reconnectDelayMs = 1000L
+                            HaDiscoveryManager(this@MqttManager).sendDiscoveryConfigs()
                         }
                     }
             } catch (e: Exception) {

@@ -8,21 +8,24 @@ import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.IBinder
-import android.util.Log
+import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.core.Preview
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.cameradetect.databinding.ActivityMainBinding
 import kotlinx.coroutines.*
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), DetectionForegroundService.DetectionCallback {
 
     private lateinit var binding: ActivityMainBinding
     private var detectionService: DetectionForegroundService? = null
+    private var serviceBinder: DetectionForegroundService.LocalBinder? = null
     private var serviceBound = false
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val logAdapter = DetectionLogAdapter()
+    private var isLogExpanded = false
 
     companion object {
         private const val TAG = "CameraDetect"
@@ -36,13 +39,16 @@ class MainActivity : AppCompatActivity() {
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             val binder = service as DetectionForegroundService.LocalBinder
+            serviceBinder = binder
             detectionService = binder.getService()
             serviceBound = true
             binder.setPreviewSurfaceProvider(binding.viewFinder.surfaceProvider)
+            binder.setDetectionCallback(this@MainActivity)
             updateUIState()
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
+            serviceBinder = null
             detectionService = null
             serviceBound = false
         }
@@ -76,6 +82,36 @@ class MainActivity : AppCompatActivity() {
                 startDetectionService()
             }
         }
+
+        binding.btnSwitchCamera.setOnClickListener {
+            serviceBinder?.let { binder ->
+                binder.switchCamera()
+                val isFront = binder.isFrontCamera()
+                Toast.makeText(this, if (isFront) "已切换到前置摄像头" else "已切换到后置摄像头", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        binding.logHeader.setOnClickListener {
+            toggleLogPanel()
+        }
+
+        binding.tvLogToggle.setOnClickListener {
+            toggleLogPanel()
+        }
+
+        binding.rvLogList.layoutManager = LinearLayoutManager(this)
+        binding.rvLogList.adapter = logAdapter
+    }
+
+    private fun toggleLogPanel() {
+        isLogExpanded = !isLogExpanded
+        if (isLogExpanded) {
+            binding.rvLogList.visibility = View.VISIBLE
+            binding.tvLogToggle.text = "收起 ▼"
+        } else {
+            binding.rvLogList.visibility = View.GONE
+            binding.tvLogToggle.text = "展开 ▲"
+        }
     }
 
     private fun isServiceRunning(): Boolean {
@@ -96,8 +132,14 @@ class MainActivity : AppCompatActivity() {
             action = DetectionForegroundService.ACTION_STOP
         }
         startService(intent)
-        unbindService(serviceConnection)
+        if (serviceBound) {
+            try {
+                unbindService(serviceConnection)
+            } catch (_: IllegalArgumentException) {
+            }
+        }
         serviceBound = false
+        serviceBinder = null
         detectionService = null
         updateUIState()
         Toast.makeText(this, "检测服务已停止", Toast.LENGTH_SHORT).show()
@@ -113,6 +155,16 @@ class MainActivity : AppCompatActivity() {
         binding.btnToggleDetection.text = if (running) "停止检测" else "开始检测"
         binding.tvPersonCount.text = if (running) "服务运行中" else "服务已停止"
         binding.tvInferenceTime.text = ""
+    }
+
+    override fun onPersonCountChanged(count: Int, timestamp: String) {
+        scope.launch {
+            binding.tvPersonCount.text = "人数: $count"
+            val entry = DetectionLogEntry(timestamp, count)
+            logAdapter.addLog(entry)
+            val latest = logAdapter.getLatest()
+            binding.tvLogSummary.text = latest?.let { "${it.timestamp} 检测到 ${it.personCount} 人" } ?: "检测日志"
+        }
     }
 
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {

@@ -7,7 +7,7 @@
         <EditTextPreference
             app:key="mqtt_broker"
             app:title="Broker地址"
-            app:defaultValue="192.168.1.100"
+            app:defaultValue="192.168.123.49"
             app:useSimpleSummaryProvider="true" />
 
         <EditTextPreference
@@ -24,14 +24,14 @@
 
         <EditTextPreference
             app:key="mqtt_username"
-            app:title="用户名 (可选)"
-            app:defaultValue=""
+            app:title="用户名"
+            app:defaultValue="fnos"
             app:useSimpleSummaryProvider="true" />
 
         <EditTextPreference
             app:key="mqtt_password"
-            app:title="密码 (可选)"
-            app:defaultValue=""
+            app:title="密码"
+            app:defaultValue="fuckfnos"
             app:useSimpleSummaryProvider="true" />
 
     </PreferenceCategory>

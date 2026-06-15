@@ -52,15 +52,26 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
 
     private var previewSurfaceProvider: Preview.SurfaceProvider? = null
     private lateinit var lifecycleRegistry: LifecycleRegistry
+    private var isUsingFrontCamera = false
+    private var detectionCallback: DetectionCallback? = null
 
     override val lifecycle: Lifecycle
         get() = lifecycleRegistry
+
+    interface DetectionCallback {
+        fun onPersonCountChanged(count: Int, timestamp: String)
+    }
 
     inner class LocalBinder : Binder() {
         fun getService(): DetectionForegroundService = this@DetectionForegroundService
         fun setPreviewSurfaceProvider(provider: Preview.SurfaceProvider?) {
             previewSurfaceProvider = provider
             updatePreview()
+        }
+        fun switchCamera() = this@DetectionForegroundService.switchCamera()
+        fun isFrontCamera(): Boolean = isUsingFrontCamera
+        fun setDetectionCallback(callback: DetectionCallback?) {
+            detectionCallback = callback
         }
     }
 
@@ -132,41 +143,54 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
             cameraProvider = cameraProviderFuture.get()
+            bindCameraUseCases()
+        }, ContextCompat.getMainExecutor(this))
+    }
 
-            val preview = Preview.Builder().build().also {
-                previewSurfaceProvider?.let { provider ->
-                    it.setSurfaceProvider(provider)
-                }
+    private fun bindCameraUseCases() {
+        val preview = Preview.Builder().build().also {
+            previewSurfaceProvider?.let { provider ->
+                it.setSurfaceProvider(provider)
             }
+        }
 
-            imageAnalyzer = ImageAnalysis.Builder()
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
-                .build()
-                .also {
-                    it.setAnalyzer(cameraExecutor) { imageProxy ->
-                        if (isDetecting && throttler.shouldProcess()) {
-                            processImage(imageProxy)
-                        } else {
-                            imageProxy.close()
-                        }
+        imageAnalyzer = ImageAnalysis.Builder()
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+            .build()
+            .also {
+                it.setAnalyzer(cameraExecutor) { imageProxy ->
+                    if (isDetecting && throttler.shouldProcess()) {
+                        processImage(imageProxy)
+                    } else {
+                        imageProxy.close()
                     }
                 }
-
-            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-            try {
-                cameraProvider?.unbindAll()
-                cameraProvider?.bindToLifecycle(
-                    this,
-                    cameraSelector,
-                    preview,
-                    imageAnalyzer
-                )
-            } catch (exc: Exception) {
-                Log.e(TAG, "Use case binding failed", exc)
             }
-        }, ContextCompat.getMainExecutor(this))
+
+        val cameraSelector = if (isUsingFrontCamera) {
+            CameraSelector.DEFAULT_FRONT_CAMERA
+        } else {
+            CameraSelector.DEFAULT_BACK_CAMERA
+        }
+
+        try {
+            cameraProvider?.unbindAll()
+            cameraProvider?.bindToLifecycle(
+                this,
+                cameraSelector,
+                preview,
+                imageAnalyzer
+            )
+        } catch (exc: Exception) {
+            Log.e(TAG, "Use case binding failed", exc)
+        }
+    }
+
+    fun switchCamera() {
+        isUsingFrontCamera = !isUsingFrontCamera
+        cameraProvider?.unbindAll()
+        bindCameraUseCases()
     }
 
     private fun updatePreview() {
@@ -179,7 +203,7 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
                     provider2.unbindAll()
                     provider2.bindToLifecycle(
                         this,
-                        CameraSelector.DEFAULT_BACK_CAMERA,
+                        if (isUsingFrontCamera) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA,
                         preview,
                         imageAnalyzer
                     )
@@ -239,12 +263,19 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
         currentPersonCount = 0
         mqttManager.publishEmptyDetection()
         updateNotification("运行中", "人数: 0")
+        notifyCallback(0)
     }
 
     override fun onDetect(boundingBoxes: List<BoundingBox>, inferenceTime: Long) {
         currentPersonCount = boundingBoxes.size
         mqttManager.publishPersonCount(currentPersonCount, boundingBoxes)
         updateNotification("运行中", "人数: $currentPersonCount | 推理: ${inferenceTime}ms")
+        notifyCallback(currentPersonCount)
+    }
+
+    private fun notifyCallback(count: Int) {
+        val timestamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+        detectionCallback?.onPersonCountChanged(count, timestamp)
     }
 
     private fun createNotificationChannel() {
@@ -297,11 +328,11 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
 
     private fun loadSettings() {
         val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
-        mqttManager.brokerHost = prefs.getString("mqtt_broker", "192.168.1.100") ?: "192.168.1.100"
+        mqttManager.brokerHost = prefs.getString("mqtt_broker", "192.168.123.49") ?: "192.168.123.49"
         mqttManager.brokerPort = prefs.getString("mqtt_port", "1883")?.toIntOrNull() ?: 1883
         mqttManager.topic = prefs.getString("mqtt_topic", "home/camera/person_count") ?: "home/camera/person_count"
-        mqttManager.username = prefs.getString("mqtt_username", "") ?: ""
-        mqttManager.password = prefs.getString("mqtt_password", "") ?: ""
+        mqttManager.username = prefs.getString("mqtt_username", "fnos") ?: "fnos"
+        mqttManager.password = prefs.getString("mqtt_password", "fuckfnos") ?: "fuckfnos"
 
         val fps = prefs.getString("inference_fps", "2")?.toIntOrNull() ?: 2
         throttler.intervalMs = 1000L / fps
