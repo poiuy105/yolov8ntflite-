@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.view.MotionEvent
@@ -73,7 +74,11 @@ class MainActivity : AppCompatActivity(), DetectionForegroundService.DetectionCa
         setContentView(binding.root)
 
         setupUI()
-        registerReceiver(dimScreenReceiver, IntentFilter("com.example.cameradetect.DIM_SCREEN"))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            registerReceiver(dimScreenReceiver, IntentFilter("com.example.cameradetect.DIM_SCREEN"), Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(dimScreenReceiver, IntentFilter("com.example.cameradetect.DIM_SCREEN"))
+        }
 
         if (allPermissionsGranted()) {
             bindToService()
