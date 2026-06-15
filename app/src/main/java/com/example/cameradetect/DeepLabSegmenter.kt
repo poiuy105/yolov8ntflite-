@@ -3,12 +3,12 @@ package com.example.cameradetect
 import android.content.Context
 import android.graphics.Bitmap
 import android.os.SystemClock
-import org.tensorflow.lite.DataType
+import android.util.Log
 import org.tensorflow.lite.Interpreter
 import org.tensorflow.lite.support.common.FileUtil
-import org.tensorflow.lite.support.image.ImageProcessor
-import org.tensorflow.lite.support.image.TensorImage
-import org.tensorflow.lite.support.image.ops.ResizeOp
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.FloatBuffer
 
 class DeepLabSegmenter(
     private val context: Context,
@@ -18,56 +18,102 @@ class DeepLabSegmenter(
 ) {
 
     private var interpreter: Interpreter? = null
-    private val inputSize = 257
-    private val numClasses = 21
+    private var inputSize = 257
+    private var outputSize = 257
+    private var numClasses = 21
     private val personClassId = 15
 
-    private val imageProcessor = ImageProcessor.Builder()
-        .add(ResizeOp(inputSize, inputSize, ResizeOp.ResizeMethod.BILINEAR))
-        .build()
-
     fun setup() {
-        val model = FileUtil.loadMappedFile(context, modelPath)
-        val options = Interpreter.Options()
-        options.setNumThreads(4)
-        interpreter = Interpreter(model, options)
+        try {
+            val model = FileUtil.loadMappedFile(context, modelPath)
+            val options = Interpreter.Options()
+            options.setNumThreads(4)
+            interpreter = Interpreter(model, options)
+
+            val inputShape = interpreter?.getInputTensor(0)?.shape()
+            if (inputShape != null) {
+                inputSize = inputShape[1]
+            }
+
+            val outputShape = interpreter?.getOutputTensor(0)?.shape()
+            Log.i("DeepLab", "inputShape=${inputShape?.contentToString()}, outputShape=${outputShape?.contentToString()}, outputType=${interpreter?.getOutputTensor(0)?.dataType()}")
+
+            if (outputShape != null) {
+                outputSize = outputShape[1]
+                if (outputShape.size == 4) {
+                    numClasses = outputShape[3]
+                } else if (outputShape.size == 3) {
+                    numClasses = outputShape[2]
+                }
+            }
+            Log.i("DeepLab", "inputSize=$inputSize, outputSize=$outputSize, numClasses=$numClasses")
+        } catch (e: Exception) {
+            Log.e("DeepLab", "Failed to setup DeepLab model", e)
+        }
     }
 
     fun detect(frame: Bitmap) {
-        interpreter ?: return
+        try {
+            interpreter ?: return
 
-        val startTime = SystemClock.uptimeMillis()
+            val startTime = SystemClock.uptimeMillis()
 
-        val tensorImage = TensorImage(DataType.FLOAT32)
-        tensorImage.load(frame)
-        val processedImage = imageProcessor.process(tensorImage)
-        val imageBuffer = processedImage.buffer
+            val resized = Bitmap.createScaledBitmap(frame, inputSize, inputSize, true)
+            val inputBuffer = convertBitmapToBuffer(resized)
+            resized.recycle()
 
-        val output = Array(1) { Array(inputSize) { Array(inputSize) { FloatArray(numClasses) } } }
-        interpreter?.run(imageBuffer, output)
+            val outputBuffer = ByteBuffer.allocateDirect(outputSize * outputSize * numClasses * 4)
+            outputBuffer.order(ByteOrder.nativeOrder())
 
-        val mask = argmaxToMask(output[0])
-        val boundingBoxes = extractPersonBoxes(mask)
-        val inferenceTime = SystemClock.uptimeMillis() - startTime
+            interpreter?.run(inputBuffer, outputBuffer)
 
-        maskCallback?.invoke(mask)
+            outputBuffer.rewind()
+            val mask = argmaxToMask(outputBuffer)
+            val boundingBoxes = extractPersonBoxes(mask)
+            val inferenceTime = SystemClock.uptimeMillis() - startTime
 
-        if (boundingBoxes.isEmpty()) {
-            detectorListener.onEmptyDetect()
-            return
+            maskCallback?.invoke(mask)
+
+            if (boundingBoxes.isEmpty()) {
+                detectorListener.onEmptyDetect()
+                return
+            }
+
+            detectorListener.onDetect(boundingBoxes, inferenceTime)
+        } catch (e: Exception) {
+            Log.e("DeepLab", "Detection error", e)
         }
-
-        detectorListener.onDetect(boundingBoxes, inferenceTime)
     }
 
-    private fun argmaxToMask(probs: Array<Array<FloatArray>>): Array<IntArray> {
-        val mask = Array(inputSize) { IntArray(inputSize) }
-        for (y in 0 until inputSize) {
-            for (x in 0 until inputSize) {
+    private fun convertBitmapToBuffer(bitmap: Bitmap): ByteBuffer {
+        val byteBuffer = ByteBuffer.allocateDirect(inputSize * inputSize * 3 * 4)
+        byteBuffer.order(ByteOrder.nativeOrder())
+
+        val pixels = IntArray(inputSize * inputSize)
+        bitmap.getPixels(pixels, 0, inputSize, 0, 0, inputSize, inputSize)
+
+        var pixel = 0
+        for (i in 0 until inputSize) {
+            for (j in 0 until inputSize) {
+                val color = pixels[pixel++]
+                byteBuffer.putFloat(((color shr 16) and 0xFF) / 255.0f)
+                byteBuffer.putFloat(((color shr 8) and 0xFF) / 255.0f)
+                byteBuffer.putFloat((color and 0xFF) / 255.0f)
+            }
+        }
+
+        return byteBuffer
+    }
+
+    private fun argmaxToMask(buffer: ByteBuffer): Array<IntArray> {
+        val mask = Array(outputSize) { IntArray(outputSize) }
+
+        for (y in 0 until outputSize) {
+            for (x in 0 until outputSize) {
                 var maxIdx = 0
-                var maxVal = probs[y][x][0]
+                var maxVal = buffer.getFloat()
                 for (c in 1 until numClasses) {
-                    val v = probs[y][x][c]
+                    val v = buffer.getFloat()
                     if (v > maxVal) {
                         maxVal = v
                         maxIdx = c
@@ -76,21 +122,22 @@ class DeepLabSegmenter(
                 mask[y][x] = maxIdx
             }
         }
+
         return mask
     }
 
     private fun extractPersonBoxes(mask: Array<IntArray>): List<BoundingBox> {
-        val visited = Array(inputSize) { BooleanArray(inputSize) }
+        val visited = Array(outputSize) { BooleanArray(outputSize) }
         val boxes = mutableListOf<BoundingBox>()
 
-        for (y in 0 until inputSize) {
-            for (x in 0 until inputSize) {
+        for (y in 0 until outputSize) {
+            for (x in 0 until outputSize) {
                 if (mask[y][x] == personClassId && !visited[y][x]) {
                     val (minX, minY, maxX, maxY) = floodFill(mask, visited, x, y)
-                    val w = (maxX - minX).toFloat() / inputSize
-                    val h = (maxY - minY).toFloat() / inputSize
-                    val cx = (minX + maxX).toFloat() / 2f / inputSize
-                    val cy = (minY + maxY).toFloat() / 2f / inputSize
+                    val w = (maxX - minX).toFloat() / outputSize
+                    val h = (maxY - minY).toFloat() / outputSize
+                    val cx = (minX + maxX).toFloat() / 2f / outputSize
+                    val cy = (minY + maxY).toFloat() / 2f / outputSize
 
                     if (w > 0.05f && h > 0.05f) {
                         boxes.add(BoundingBox(
@@ -136,7 +183,7 @@ class DeepLabSegmenter(
                 x to y - 1, x to y + 1
             )
             for ((nx, ny) in neighbors) {
-                if (nx in 0 until inputSize && ny in 0 until inputSize
+                if (nx in 0 until outputSize && ny in 0 until outputSize
                     && !visited[ny][nx] && mask[ny][nx] == personClassId) {
                     visited[ny][nx] = true
                     stack.add(nx to ny)
