@@ -17,12 +17,14 @@
     </string-array>
 
     <string-array name="model_entries">
-        <item>YOLOv8n (快速)</item>
-        <item>SSD MobileNet V2 (省电)</item>
+        <item>YOLOv8n (快速检测)</item>
+        <item>SSD MobileNet V2 (省电检测)</item>
+        <item>DeepLab V3 (像素分割)</item>
     </string-array>
 
     <string-array name="model_values">
         <item>yolov8n.tflite</item>
         <item>ssd_mobilenetv2_fpnlite.tflite</item>
+        <item>deeplabv3.tflite</item>
     </string-array>
 </resources>

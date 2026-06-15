@@ -40,7 +40,8 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
     private lateinit var cameraExecutor: ExecutorService
     private var yoloDetector: YoloDetector? = null
     private var ssdDetector: SsdDetector? = null
-    private var useSsdModel = false
+    private var deepLabSegmenter: DeepLabSegmenter? = null
+    private var detectorType = "yolo"
     private lateinit var mqttManager: MqttManager
     private lateinit var bitmapPool: BitmapPool
     private lateinit var throttler: InferenceThrottler
@@ -125,18 +126,31 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
     private fun initYoloDetector() {
         yoloDetector?.close()
         ssdDetector?.close()
+        deepLabSegmenter?.close()
         yoloDetector = null
         ssdDetector = null
+        deepLabSegmenter = null
 
-        useSsdModel = currentModelPath.contains("ssd")
-        if (useSsdModel) {
-            ssdDetector = SsdDetector(this, currentModelPath, "labels.txt", this)
-            if (isDetecting) ssdDetector?.setup()
-        } else {
-            yoloDetector = YoloDetector(this, currentModelPath, "labels.txt", this)
-            if (isDetecting) yoloDetector?.setup()
+        detectorType = when {
+            currentModelPath.contains("ssd") -> "ssd"
+            currentModelPath.contains("deeplab") -> "deeplab"
+            else -> "yolo"
         }
-        Log.i(TAG, "Initialized detector: $currentModelPath (SSD=$useSsdModel)")
+        when (detectorType) {
+            "ssd" -> {
+                ssdDetector = SsdDetector(this, currentModelPath, "labels.txt", this)
+                if (isDetecting) ssdDetector?.setup()
+            }
+            "deeplab" -> {
+                deepLabSegmenter = DeepLabSegmenter(this, currentModelPath, this)
+                if (isDetecting) deepLabSegmenter?.setup()
+            }
+            else -> {
+                yoloDetector = YoloDetector(this, currentModelPath, "labels.txt", this)
+                if (isDetecting) yoloDetector?.setup()
+            }
+        }
+        Log.i(TAG, "Initialized detector: $currentModelPath (type=$detectorType)")
     }
 
     fun switchModel(modelPath: String) {
@@ -192,6 +206,7 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
         imageAnalyzer?.clearAnalyzer()
         yoloDetector?.close()
         ssdDetector?.close()
+        deepLabSegmenter?.close()
         mqttManager.disconnect()
         batteryMonitor.stop()
         thermalManager.stop()
@@ -281,10 +296,10 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
 
     private fun processImage(imageProxy: ImageProxy) {
         val bitmap = toBitmap(imageProxy)
-        if (useSsdModel) {
-            ssdDetector?.detect(bitmap)
-        } else {
-            yoloDetector?.detect(bitmap)
+        when (detectorType) {
+            "ssd" -> ssdDetector?.detect(bitmap)
+            "deeplab" -> deepLabSegmenter?.detect(bitmap)
+            else -> yoloDetector?.detect(bitmap)
         }
         bitmapPool.release(bitmap)
         imageProxy.close()
