@@ -2,7 +2,6 @@ package com.example.cameradetect
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.RectF
 import android.os.SystemClock
 import org.tensorflow.lite.DataType
 import org.tensorflow.lite.Interpreter
@@ -12,7 +11,6 @@ import org.tensorflow.lite.support.common.FileUtil
 import org.tensorflow.lite.support.image.ImageProcessor
 import org.tensorflow.lite.support.image.TensorImage
 import org.tensorflow.lite.support.image.ops.ResizeOp
-import org.tensorflow.lite.support.image.ops.NormalizeOp
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStream
@@ -22,7 +20,7 @@ class SsdDetector(
     private val context: Context,
     private val modelPath: String,
     private val labelPath: String,
-    private val detectorListener: DetectorListener
+    private val detectorListener: YoloDetector.DetectorListener
 ) {
 
     private var interpreter: Interpreter? = null
@@ -32,7 +30,6 @@ class SsdDetector(
 
     private val imageProcessor = ImageProcessor.Builder()
         .add(ResizeOp(inputSize, inputSize, ResizeOp.ResizeMethod.BILINEAR))
-        .add(NormalizeOp(0f, 255f))
         .build()
 
     fun setup() {
@@ -76,7 +73,7 @@ class SsdDetector(
 
         val startTime = SystemClock.uptimeMillis()
 
-        val tensorImage = TensorImage(DataType.FLOAT32)
+        val tensorImage = TensorImage(DataType.UINT8)
         tensorImage.load(frame)
         val processedImage = imageProcessor.process(tensorImage)
         val imageBuffer = processedImage.buffer
@@ -172,11 +169,6 @@ class SsdDetector(
     fun close() {
         interpreter?.close()
         interpreter = null
-    }
-
-    interface DetectorListener {
-        fun onEmptyDetect()
-        fun onDetect(boundingBoxes: List<BoundingBox>, inferenceTime: Long)
     }
 
     companion object {
