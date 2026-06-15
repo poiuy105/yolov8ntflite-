@@ -20,11 +20,13 @@
         <item>YOLOv8n (最快)</item>
         <item>YOLOv8s (均衡)</item>
         <item>YOLOv8m (更准)</item>
+        <item>SSD MobileNet V2 (省电)</item>
     </string-array>
 
     <string-array name="model_values">
         <item>yolov8n.tflite</item>
         <item>yolov8s.tflite</item>
         <item>yolov8m.tflite</item>
+        <item>ssd_mobilenetv2_fpnlite.tflite</item>
     </string-array>
 </resources>

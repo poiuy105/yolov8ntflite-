@@ -39,6 +39,8 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
     private val binder = LocalBinder()
     private lateinit var cameraExecutor: ExecutorService
     private var yoloDetector: YoloDetector? = null
+    private var ssdDetector: SsdDetector? = null
+    private var useSsdModel = false
     private lateinit var mqttManager: MqttManager
     private lateinit var bitmapPool: BitmapPool
     private lateinit var throttler: InferenceThrottler
@@ -119,10 +121,19 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
 
     private fun initYoloDetector() {
         yoloDetector?.close()
-        yoloDetector = YoloDetector(this, currentModelPath, "labels.txt", this)
-        if (isDetecting) {
-            yoloDetector?.setup()
+        ssdDetector?.close()
+        yoloDetector = null
+        ssdDetector = null
+
+        useSsdModel = currentModelPath.contains("ssd")
+        if (useSsdModel) {
+            ssdDetector = SsdDetector(this, currentModelPath, "labels.txt", this)
+            if (isDetecting) ssdDetector?.setup()
+        } else {
+            yoloDetector = YoloDetector(this, currentModelPath, "labels.txt", this)
+            if (isDetecting) yoloDetector?.setup()
         }
+        Log.i(TAG, "Initialized detector: $currentModelPath (SSD=$useSsdModel)")
     }
 
     fun switchModel(modelPath: String) {
@@ -177,6 +188,7 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
         cameraProvider?.unbindAll()
         imageAnalyzer?.clearAnalyzer()
         yoloDetector?.close()
+        ssdDetector?.close()
         mqttManager.disconnect()
         batteryMonitor.stop()
         thermalManager.stop()
@@ -262,7 +274,11 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
 
     private fun processImage(imageProxy: ImageProxy) {
         val bitmap = toBitmap(imageProxy)
-        yoloDetector?.detect(bitmap)
+        if (useSsdModel) {
+            ssdDetector?.detect(bitmap)
+        } else {
+            yoloDetector?.detect(bitmap)
+        }
         bitmapPool.release(bitmap)
         imageProxy.close()
     }

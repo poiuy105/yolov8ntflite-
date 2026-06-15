@@ -87,3 +87,8 @@ lint/tmp/
 # OS-specific files
 .DS_Store
 Thumbs.db
+
+
+# others
+app-debug*
+app-output*/
