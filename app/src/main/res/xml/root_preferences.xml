@@ -39,6 +39,14 @@
     <PreferenceCategory app:title="检测配置">
 
         <ListPreference
+            app:key="model_file"
+            app:title="检测模型"
+            app:defaultValue="yolov8n.tflite"
+            app:entries="@array/model_entries"
+            app:entryValues="@array/model_values"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
             app:key="inference_fps"
             app:title="推理帧率"
             app:defaultValue="2"

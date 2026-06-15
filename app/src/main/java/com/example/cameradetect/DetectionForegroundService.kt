@@ -38,7 +38,7 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
 
     private val binder = LocalBinder()
     private lateinit var cameraExecutor: ExecutorService
-    private lateinit var yoloDetector: YoloDetector
+    private var yoloDetector: YoloDetector? = null
     private lateinit var mqttManager: MqttManager
     private lateinit var bitmapPool: BitmapPool
     private lateinit var throttler: InferenceThrottler
@@ -55,6 +55,7 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
     private var isPausedByPower = false
     private var currentPersonCount = 0
     private var originalFps = 2
+    private var currentModelPath = "yolov8n.tflite"
     private var serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var heartbeatJob: Job? = null
     private var dimScreenJob: Job? = null
@@ -84,6 +85,8 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
         fun setDetectionCallback(callback: DetectionCallback?) {
             detectionCallback = callback
         }
+        fun switchModel(modelPath: String) = this@DetectionForegroundService.switchModel(modelPath)
+        fun getCurrentModel(): String = currentModelPath
     }
 
     override fun onBind(intent: Intent): IBinder {
@@ -95,7 +98,6 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
         lifecycleRegistry = LifecycleRegistry(this)
         lifecycleRegistry.currentState = Lifecycle.State.CREATED
         cameraExecutor = Executors.newSingleThreadExecutor()
-        yoloDetector = YoloDetector(this, "yolov8n.tflite", "labels.txt", this)
         mqttManager = MqttManager(this)
         bitmapPool = BitmapPool(640, 480, Bitmap.Config.ARGB_8888)
         throttler = InferenceThrottler(500L)
@@ -111,7 +113,23 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "CameraDetect::WakeLock")
 
         loadSettings()
+        initYoloDetector()
         createNotificationChannel()
+    }
+
+    private fun initYoloDetector() {
+        yoloDetector?.close()
+        yoloDetector = YoloDetector(this, currentModelPath, "labels.txt", this)
+        if (isDetecting) {
+            yoloDetector?.setup()
+        }
+    }
+
+    fun switchModel(modelPath: String) {
+        if (modelPath == currentModelPath) return
+        currentModelPath = modelPath
+        initYoloDetector()
+        Log.i(TAG, "Switched to model: $modelPath")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -137,7 +155,7 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
         serviceStartTime = System.currentTimeMillis()
         lifecycleRegistry.currentState = Lifecycle.State.RESUMED
 
-        yoloDetector.setup()
+        yoloDetector?.setup()
         mqttManager.connect()
         batteryMonitor.start()
         thermalManager.start()
@@ -158,7 +176,7 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
         dimScreenJob?.cancel()
         cameraProvider?.unbindAll()
         imageAnalyzer?.clearAnalyzer()
-        yoloDetector.close()
+        yoloDetector?.close()
         mqttManager.disconnect()
         batteryMonitor.stop()
         thermalManager.stop()
@@ -244,7 +262,7 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
 
     private fun processImage(imageProxy: ImageProxy) {
         val bitmap = toBitmap(imageProxy)
-        yoloDetector.detect(bitmap)
+        yoloDetector?.detect(bitmap)
         bitmapPool.release(bitmap)
         imageProxy.close()
     }
@@ -460,6 +478,7 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
 
         originalFps = prefs.getString("inference_fps", "2")?.toIntOrNull() ?: 2
         throttler.intervalMs = 1000L / originalFps
+        currentModelPath = prefs.getString("model_file", "yolov8n.tflite") ?: "yolov8n.tflite"
     }
 
     override fun onDestroy() {
