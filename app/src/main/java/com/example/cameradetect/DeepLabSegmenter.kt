@@ -15,7 +15,8 @@ import org.tensorflow.lite.support.image.ops.ResizeOp
 class DeepLabSegmenter(
     private val context: Context,
     private val modelPath: String,
-    private val detectorListener: YoloDetector.DetectorListener
+    private val detectorListener: YoloDetector.DetectorListener,
+    private val maskCallback: ((Array<IntArray>) -> Unit)? = null
 ) {
 
     private var interpreter: Interpreter? = null
@@ -58,6 +59,8 @@ class DeepLabSegmenter(
         val mask = output[0]
         val boundingBoxes = extractPersonBoxes(mask)
         val inferenceTime = SystemClock.uptimeMillis() - startTime
+
+        maskCallback?.invoke(mask)
 
         if (boundingBoxes.isEmpty()) {
             detectorListener.onEmptyDetect()

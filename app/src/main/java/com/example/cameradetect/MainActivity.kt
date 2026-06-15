@@ -231,6 +231,12 @@ class MainActivity : AppCompatActivity(), DetectionForegroundService.DetectionCa
         }
     }
 
+    override fun onSegmentationMask(mask: Array<IntArray>?) {
+        scope.launch {
+            binding.overlayView.setSegmentationMask(mask)
+        }
+    }
+
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
         ContextCompat.checkSelfPermission(baseContext, it) == PackageManager.PERMISSION_GRANTED
     }

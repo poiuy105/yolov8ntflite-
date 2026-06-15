@@ -76,6 +76,7 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
     interface DetectionCallback {
         fun onPersonCountChanged(count: Int, timestamp: String)
         fun onDetectionResults(boundingBoxes: List<BoundingBox>, inferenceTime: Long)
+        fun onSegmentationMask(mask: Array<IntArray>?) {}
     }
 
     inner class LocalBinder : Binder() {
@@ -142,7 +143,9 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
                 if (isDetecting) ssdDetector?.setup()
             }
             "deeplab" -> {
-                deepLabSegmenter = DeepLabSegmenter(this, currentModelPath, this)
+                deepLabSegmenter = DeepLabSegmenter(this, currentModelPath, this) { mask ->
+                    detectionCallback?.onSegmentationMask(mask)
+                }
                 if (isDetecting) deepLabSegmenter?.setup()
             }
             else -> {
