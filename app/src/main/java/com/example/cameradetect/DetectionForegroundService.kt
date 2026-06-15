@@ -11,7 +11,9 @@ import android.graphics.Bitmap
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
+import android.view.WindowManager
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.NotificationCompat
@@ -41,13 +43,21 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
     private lateinit var bitmapPool: BitmapPool
     private lateinit var throttler: InferenceThrottler
     private lateinit var batteryMonitor: BatteryMonitor
+    private lateinit var thermalManager: ThermalManager
+    private lateinit var ambientLightManager: AmbientLightManager
+    private lateinit var wakeLock: PowerManager.WakeLock
 
     private var imageAnalyzer: ImageAnalysis? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var isDetecting = false
+    private var isPausedByThermal = false
+    private var isPausedByLight = false
+    private var isPausedByPower = false
     private var currentPersonCount = 0
+    private var originalFps = 2
     private var serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var heartbeatJob: Job? = null
+    private var dimScreenJob: Job? = null
     private var serviceStartTime = 0L
 
     private var previewSurfaceProvider: Preview.SurfaceProvider? = null
@@ -89,6 +99,15 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
         bitmapPool = BitmapPool(640, 480, Bitmap.Config.ARGB_8888)
         throttler = InferenceThrottler(500L)
         batteryMonitor = BatteryMonitor(this)
+        thermalManager = ThermalManager(this, batteryMonitor) { state ->
+            onThermalStateChanged(state)
+        }
+        ambientLightManager = AmbientLightManager(this) { level ->
+            onLightLevelChanged(level)
+        }
+
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "CameraDetect::WakeLock")
 
         loadSettings()
         createNotificationChannel()
@@ -120,8 +139,13 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
         yoloDetector.setup()
         mqttManager.connect()
         batteryMonitor.start()
+        thermalManager.start()
+        ambientLightManager.start()
+        wakeLock.acquire(10*60*1000L)
         startCamera()
         startHeartbeat()
+        startPowerMonitoring()
+        scheduleDimScreen()
 
         Log.i(TAG, "Detection started")
     }
@@ -130,11 +154,15 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
         isDetecting = false
         lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
         heartbeatJob?.cancel()
+        dimScreenJob?.cancel()
         cameraProvider?.unbindAll()
         imageAnalyzer?.clearAnalyzer()
         yoloDetector.close()
         mqttManager.disconnect()
         batteryMonitor.stop()
+        thermalManager.stop()
+        ambientLightManager.stop()
+        if (wakeLock.isHeld) wakeLock.release()
         bitmapPool.clear()
         Log.i(TAG, "Detection stopped")
     }
@@ -326,6 +354,100 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
         notificationManager.notify(NOTIFICATION_ID, notification)
     }
 
+    private fun onThermalStateChanged(state: ThermalManager.ThermalState) {
+        when (state) {
+            ThermalManager.ThermalState.NORMAL -> {
+                isPausedByThermal = false
+                restoreOriginalFps()
+                updateNotification("运行中", "温度正常 | 人数: $currentPersonCount")
+            }
+            ThermalManager.ThermalState.WARNING -> {
+                isPausedByThermal = false
+                setFps(1)
+                updateNotification("警告", "${thermalManager.getStatusText()} | 人数: $currentPersonCount")
+            }
+            ThermalManager.ThermalState.CRITICAL -> {
+                isPausedByThermal = true
+                updateNotification("过热保护", "${thermalManager.getStatusText()} | 人数: $currentPersonCount")
+            }
+        }
+    }
+
+    private fun onLightLevelChanged(level: AmbientLightManager.LightLevel) {
+        when (level) {
+            AmbientLightManager.LightLevel.BRIGHT -> {
+                isPausedByLight = false
+                if (!isPausedByThermal && !isPausedByPower) {
+                    restoreOriginalFps()
+                }
+            }
+            AmbientLightManager.LightLevel.DIM -> {
+                isPausedByLight = false
+                if (!isPausedByThermal) {
+                    setFps(1)
+                }
+            }
+            AmbientLightManager.LightLevel.DARK -> {
+                isPausedByLight = true
+            }
+        }
+    }
+
+    private fun startPowerMonitoring() {
+        serviceScope.launch {
+            while (isActive && isDetecting) {
+                checkPowerState()
+                delay(30000L)
+            }
+        }
+    }
+
+    private fun checkPowerState() {
+        if (batteryMonitor.isCharging) {
+            if (isPausedByPower) {
+                isPausedByPower = false
+                if (!isPausedByThermal && !isPausedByLight) {
+                    restoreOriginalFps()
+                }
+            }
+        } else {
+            when {
+                batteryMonitor.batteryLevel <= 20 -> {
+                    isPausedByPower = true
+                }
+                batteryMonitor.batteryLevel <= 50 && !isPausedByThermal -> {
+                    isPausedByPower = false
+                    setFps(1)
+                }
+                else -> {
+                    if (isPausedByPower) {
+                        isPausedByPower = false
+                        if (!isPausedByThermal && !isPausedByLight) {
+                            restoreOriginalFps()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun scheduleDimScreen() {
+        dimScreenJob?.cancel()
+        dimScreenJob = serviceScope.launch {
+            delay(30000L)
+            val intent = Intent("com.example.cameradetect.DIM_SCREEN")
+            sendBroadcast(intent)
+        }
+    }
+
+    private fun setFps(fps: Int) {
+        throttler.intervalMs = 1000L / fps
+    }
+
+    private fun restoreOriginalFps() {
+        throttler.intervalMs = 1000L / originalFps
+    }
+
     private fun loadSettings() {
         val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
         mqttManager.brokerHost = prefs.getString("mqtt_broker", "192.168.123.49") ?: "192.168.123.49"
@@ -334,8 +456,8 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
         mqttManager.username = prefs.getString("mqtt_username", "fnos") ?: "fnos"
         mqttManager.password = prefs.getString("mqtt_password", "fuckfnos") ?: "fuckfnos"
 
-        val fps = prefs.getString("inference_fps", "2")?.toIntOrNull() ?: 2
-        throttler.intervalMs = 1000L / fps
+        originalFps = prefs.getString("inference_fps", "2")?.toIntOrNull() ?: 2
+        throttler.intervalMs = 1000L / originalFps
     }
 
     override fun onDestroy() {

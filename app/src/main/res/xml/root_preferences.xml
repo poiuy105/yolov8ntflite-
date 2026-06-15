@@ -53,6 +53,34 @@
 
     </PreferenceCategory>
 
+    <PreferenceCategory app:title="省电与保护">
+
+        <SwitchPreferenceCompat
+            app:key="thermal_protection"
+            app:title="温度保护"
+            app:summary="过热时自动降频或暂停"
+            app:defaultValue="true" />
+
+        <SwitchPreferenceCompat
+            app:key="power_save_mode"
+            app:title="省电模式"
+            app:summary="未充电时自动降低帧率"
+            app:defaultValue="true" />
+
+        <SwitchPreferenceCompat
+            app:key="auto_dim_screen"
+            app:title="自动降低亮度"
+            app:summary="启动后30秒自动降低屏幕亮度"
+            app:defaultValue="true" />
+
+        <SwitchPreferenceCompat
+            app:key="night_mode"
+            app:title="夜间模式"
+            app:summary="暗光环境自动降低帧率"
+            app:defaultValue="true" />
+
+    </PreferenceCategory>
+
     <PreferenceCategory app:title="高级配置">
 
         <EditTextPreference

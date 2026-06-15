@@ -1,14 +1,18 @@
 package com.example.cameradetect
 
 import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.IBinder
+import android.view.MotionEvent
 import android.view.View
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -26,6 +30,7 @@ class MainActivity : AppCompatActivity(), DetectionForegroundService.DetectionCa
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val logAdapter = DetectionLogAdapter()
     private var isLogExpanded = false
+    private var isScreenDimmed = false
 
     companion object {
         private const val TAG = "CameraDetect"
@@ -34,6 +39,14 @@ class MainActivity : AppCompatActivity(), DetectionForegroundService.DetectionCa
             Manifest.permission.CAMERA,
             Manifest.permission.POST_NOTIFICATIONS
         )
+    }
+
+    private val dimScreenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == "com.example.cameradetect.DIM_SCREEN") {
+                dimScreen()
+            }
+        }
     }
 
     private val serviceConnection = object : ServiceConnection {
@@ -60,6 +73,7 @@ class MainActivity : AppCompatActivity(), DetectionForegroundService.DetectionCa
         setContentView(binding.root)
 
         setupUI()
+        registerReceiver(dimScreenReceiver, IntentFilter("com.example.cameradetect.DIM_SCREEN"))
 
         if (allPermissionsGranted()) {
             bindToService()
@@ -68,6 +82,27 @@ class MainActivity : AppCompatActivity(), DetectionForegroundService.DetectionCa
                 this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS
             )
         }
+    }
+
+    override fun onTouchEvent(event: MotionEvent?): Boolean {
+        if (isScreenDimmed && event?.action == MotionEvent.ACTION_DOWN) {
+            restoreScreenBrightness()
+        }
+        return super.onTouchEvent(event)
+    }
+
+    private fun dimScreen() {
+        val params = window.attributes
+        params.screenBrightness = 0.01f
+        window.attributes = params
+        isScreenDimmed = true
+    }
+
+    private fun restoreScreenBrightness() {
+        val params = window.attributes
+        params.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+        window.attributes = params
+        isScreenDimmed = false
     }
 
     private fun setupUI() {
@@ -201,6 +236,10 @@ class MainActivity : AppCompatActivity(), DetectionForegroundService.DetectionCa
                 unbindService(serviceConnection)
             } catch (_: IllegalArgumentException) {
             }
+        }
+        try {
+            unregisterReceiver(dimScreenReceiver)
+        } catch (_: IllegalArgumentException) {
         }
         scope.cancel()
     }
