@@ -124,11 +124,7 @@ class MainActivity : AppCompatActivity(), DetectionForegroundService.DetectionCa
         }
 
         binding.btnSwitchCamera.setOnClickListener {
-            serviceBinder?.let { binder ->
-                binder.switchCamera()
-                val isFront = binder.isFrontCamera()
-                Toast.makeText(this, if (isFront) "已切换到前置摄像头" else "已切换到后置摄像头", Toast.LENGTH_SHORT).show()
-            }
+            showCameraSelectionDialog()
         }
 
         binding.logHeader.setOnClickListener {
@@ -141,6 +137,27 @@ class MainActivity : AppCompatActivity(), DetectionForegroundService.DetectionCa
 
         binding.rvLogList.layoutManager = LinearLayoutManager(this)
         binding.rvLogList.adapter = logAdapter
+    }
+
+    private fun showCameraSelectionDialog() {
+        val cameras = CameraEnumerator(this).enumerateCameras()
+        if (cameras.isEmpty()) {
+            Toast.makeText(this, "未检测到摄像头", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val displayNames = cameras.map { it.getDisplayName() }.toTypedArray()
+        val cameraIds = cameras.map { it.cameraId }.toTypedArray()
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("选择摄像头")
+            .setItems(displayNames) { _, which ->
+                val selectedId = cameraIds[which]
+                serviceBinder?.switchToCamera(selectedId)
+                Toast.makeText(this, "已切换到: ${displayNames[which]}", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     private fun toggleLogPanel() {

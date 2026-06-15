@@ -66,6 +66,7 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
     private var previewSurfaceProvider: Preview.SurfaceProvider? = null
     private lateinit var lifecycleRegistry: LifecycleRegistry
     private var isUsingFrontCamera = false
+    private var currentCameraId = "0"
     private var detectionCallback: DetectionCallback? = null
 
     override val lifecycle: Lifecycle
@@ -89,6 +90,8 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
         }
         fun switchModel(modelPath: String) = this@DetectionForegroundService.switchModel(modelPath)
         fun getCurrentModel(): String = currentModelPath
+        fun switchToCamera(cameraId: String) = this@DetectionForegroundService.switchToCamera(cameraId)
+        fun getCurrentCameraId(): String = currentCameraId
     }
 
     override fun onBind(intent: Intent): IBinder {
@@ -227,11 +230,7 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
                 }
             }
 
-        val cameraSelector = if (isUsingFrontCamera) {
-            CameraSelector.DEFAULT_FRONT_CAMERA
-        } else {
-            CameraSelector.DEFAULT_BACK_CAMERA
-        }
+        val cameraSelector = CameraEnumerator(this).createCameraSelector(currentCameraId)
 
         try {
             cameraProvider?.unbindAll()
@@ -250,6 +249,14 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
         isUsingFrontCamera = !isUsingFrontCamera
         cameraProvider?.unbindAll()
         bindCameraUseCases()
+    }
+
+    fun switchToCamera(cameraId: String) {
+        if (cameraId == currentCameraId) return
+        currentCameraId = cameraId
+        cameraProvider?.unbindAll()
+        bindCameraUseCases()
+        Log.i(TAG, "Switched to camera: $cameraId")
     }
 
     private fun updatePreview() {
@@ -495,6 +502,7 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
         originalFps = prefs.getString("inference_fps", "2")?.toIntOrNull() ?: 2
         throttler.intervalMs = 1000L / originalFps
         currentModelPath = prefs.getString("model_file", "yolov8n.tflite") ?: "yolov8n.tflite"
+        currentCameraId = prefs.getString("camera_id", "0") ?: "0"
     }
 
     override fun onDestroy() {

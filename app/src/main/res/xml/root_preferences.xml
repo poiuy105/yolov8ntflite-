@@ -46,6 +46,13 @@
             app:entryValues="@array/model_values"
             app:useSimpleSummaryProvider="true" />
 
+        <EditTextPreference
+            app:key="camera_id"
+            app:title="摄像头ID"
+            app:summary="0=主摄, 2=广角, 4=长焦等"
+            app:defaultValue="0"
+            app:useSimpleSummaryProvider="true" />
+
         <ListPreference
             app:key="inference_fps"
             app:title="推理帧率"
