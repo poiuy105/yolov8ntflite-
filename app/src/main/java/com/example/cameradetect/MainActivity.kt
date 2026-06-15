@@ -207,6 +207,13 @@ class MainActivity : AppCompatActivity(), DetectionForegroundService.DetectionCa
         }
     }
 
+    override fun onDetectionResults(boundingBoxes: List<BoundingBox>, inferenceTime: Long) {
+        scope.launch {
+            binding.overlayView.setResults(boundingBoxes)
+            binding.tvInferenceTime.text = "推理: ${inferenceTime}ms"
+        }
+    }
+
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
         ContextCompat.checkSelfPermission(baseContext, it) == PackageManager.PERMISSION_GRANTED
     }

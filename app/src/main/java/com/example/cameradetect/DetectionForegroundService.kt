@@ -70,6 +70,7 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
 
     interface DetectionCallback {
         fun onPersonCountChanged(count: Int, timestamp: String)
+        fun onDetectionResults(boundingBoxes: List<BoundingBox>, inferenceTime: Long)
     }
 
     inner class LocalBinder : Binder() {
@@ -291,19 +292,20 @@ class DetectionForegroundService : Service(), YoloDetector.DetectorListener, Lif
         currentPersonCount = 0
         mqttManager.publishEmptyDetection()
         updateNotification("运行中", "人数: 0")
-        notifyCallback(0)
+        notifyCallback(0, emptyList(), 0)
     }
 
     override fun onDetect(boundingBoxes: List<BoundingBox>, inferenceTime: Long) {
         currentPersonCount = boundingBoxes.size
         mqttManager.publishPersonCount(currentPersonCount, boundingBoxes)
         updateNotification("运行中", "人数: $currentPersonCount | 推理: ${inferenceTime}ms")
-        notifyCallback(currentPersonCount)
+        notifyCallback(currentPersonCount, boundingBoxes, inferenceTime)
     }
 
-    private fun notifyCallback(count: Int) {
+    private fun notifyCallback(count: Int, boxes: List<BoundingBox>, inferenceTime: Long) {
         val timestamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
         detectionCallback?.onPersonCountChanged(count, timestamp)
+        detectionCallback?.onDetectionResults(boxes, inferenceTime)
     }
 
     private fun createNotificationChannel() {
