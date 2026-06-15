@@ -16,6 +16,8 @@ class MqttManager(private val context: Context) {
     private var mqttClient: Mqtt3AsyncClient? = null
     private var _isConnected = false
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var reconnectJob: Job? = null
+    private var reconnectDelayMs = 1000L
 
     var brokerHost: String = "192.168.1.100"
     var brokerPort: Int = 1883
@@ -31,9 +33,10 @@ class MqttManager(private val context: Context) {
     private val publishInterval = 5000L
 
     fun connect() {
+        if (_isConnected) return
         scope.launch {
             try {
-                disconnect()
+                disconnectInternal()
 
                 val clientBuilder = Mqtt3Client.builder()
                     .identifier(clientId)
@@ -53,24 +56,42 @@ class MqttManager(private val context: Context) {
                     ?.cleanSession(true)
                     ?.keepAlive(20)
                     ?.send()
-                    ?.whenComplete { result, throwable ->
+                    ?.whenComplete { _, throwable ->
                         if (throwable != null) {
                             Log.e("MqttManager", "Connect failed", throwable)
                             _isConnected = false
+                            scheduleReconnect()
                         } else {
                             Log.i("MqttManager", "Connected to MQTT broker")
                             _isConnected = true
+                            reconnectDelayMs = 1000L
                         }
                     }
             } catch (e: Exception) {
                 Log.e("MqttManager", "Connect error", e)
                 _isConnected = false
+                scheduleReconnect()
             }
         }
     }
 
+    private fun scheduleReconnect() {
+        reconnectJob?.cancel()
+        reconnectJob = scope.launch {
+            Log.i("MqttManager", "Reconnecting in ${reconnectDelayMs}ms...")
+            delay(reconnectDelayMs)
+            reconnectDelayMs = (reconnectDelayMs * 2).coerceAtMost(60000L)
+            connect()
+        }
+    }
+
     fun publishPersonCount(count: Int, detections: List<BoundingBox> = emptyList()) {
-        if (!_isConnected) return
+        if (!_isConnected) {
+            if (reconnectJob?.isActive != true) {
+                scheduleReconnect()
+            }
+            return
+        }
 
         val currentTime = System.currentTimeMillis()
         if (count == lastPersonCount && (currentTime - lastPublishTime) < publishInterval) {
@@ -111,8 +132,32 @@ class MqttManager(private val context: Context) {
                     ?.payload(json.toString().toByteArray())
                     ?.qos(MqttQos.AT_LEAST_ONCE)
                     ?.send()
+                    ?.whenComplete { _, throwable ->
+                        if (throwable != null) {
+                            Log.e("MqttManager", "Publish failed", throwable)
+                            _isConnected = false
+                            scheduleReconnect()
+                        }
+                    }
             } catch (e: Exception) {
                 Log.e("MqttManager", "Publish error", e)
+                _isConnected = false
+                scheduleReconnect()
+            }
+        }
+    }
+
+    fun publishRaw(topicOverride: String, payload: String, qos: MqttQos = MqttQos.AT_LEAST_ONCE) {
+        if (!_isConnected) return
+        scope.launch {
+            try {
+                mqttClient?.publishWith()
+                    ?.topic(topicOverride)
+                    ?.payload(payload.toByteArray())
+                    ?.qos(qos)
+                    ?.send()
+            } catch (e: Exception) {
+                Log.e("MqttManager", "Raw publish error", e)
             }
         }
     }
@@ -121,13 +166,17 @@ class MqttManager(private val context: Context) {
         publishPersonCount(0, emptyList())
     }
 
-    fun disconnect() {
+    private fun disconnectInternal() {
         try {
             mqttClient?.disconnect()
-            _isConnected = false
-        } catch (e: Exception) {
-            Log.e("MqttManager", "Disconnect error", e)
+        } catch (_: Exception) {
         }
+        _isConnected = false
+    }
+
+    fun disconnect() {
+        reconnectJob?.cancel()
+        disconnectInternal()
     }
 
     fun cleanup() {

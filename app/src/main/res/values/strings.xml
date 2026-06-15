@@ -1,4 +1,18 @@
 <resources>
     <string name="app_name">人员检测</string>
     <string name="settings_title">设置</string>
+
+    <string-array name="fps_entries">
+        <item>1 fps (最省电)</item>
+        <item>2 fps (推荐)</item>
+        <item>5 fps</item>
+        <item>10 fps (最流畅)</item>
+    </string-array>
+
+    <string-array name="fps_values">
+        <item>1</item>
+        <item>2</item>
+        <item>5</item>
+        <item>10</item>
+    </string-array>
 </resources>

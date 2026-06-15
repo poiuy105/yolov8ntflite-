@@ -36,4 +36,41 @@
 
     </PreferenceCategory>
 
+    <PreferenceCategory app:title="检测配置">
+
+        <ListPreference
+            app:key="inference_fps"
+            app:title="推理帧率"
+            app:defaultValue="2"
+            app:entries="@array/fps_entries"
+            app:entryValues="@array/fps_values"
+            app:useSimpleSummaryProvider="true" />
+
+        <SwitchPreferenceCompat
+            app:key="enable_preview"
+            app:title="显示相机预览"
+            app:defaultValue="true" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="高级配置">
+
+        <EditTextPreference
+            app:key="heartbeat_interval"
+            app:title="心跳间隔 (秒)"
+            app:defaultValue="30"
+            app:useSimpleSummaryProvider="true" />
+
+        <SwitchPreferenceCompat
+            app:key="auto_start_on_boot"
+            app:title="开机自启"
+            app:defaultValue="false" />
+
+        <SwitchPreferenceCompat
+            app:key="enable_watchdog"
+            app:title="启用心跳"
+            app:defaultValue="true" />
+
+    </PreferenceCategory>
+
 </PreferenceScreen>

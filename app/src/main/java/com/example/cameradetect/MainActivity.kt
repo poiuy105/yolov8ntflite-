@@ -1,38 +1,51 @@
 package com.example.cameradetect
 
 import android.Manifest
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
 import android.os.Bundle
+import android.os.IBinder
 import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.core.*
-import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.core.Preview
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.cameradetect.databinding.ActivityMainBinding
 import kotlinx.coroutines.*
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 
-class MainActivity : AppCompatActivity(), YoloDetector.DetectorListener {
+class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
-    private lateinit var cameraExecutor: ExecutorService
-    private lateinit var yoloDetector: YoloDetector
-    private lateinit var mqttManager: MqttManager
-
-    private var imageAnalyzer: ImageAnalysis? = null
-    private var cameraProvider: ProcessCameraProvider? = null
-    private var isDetecting = false
+    private var detectionService: DetectionForegroundService? = null
+    private var serviceBound = false
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     companion object {
         private const val TAG = "CameraDetect"
         private const val REQUEST_CODE_PERMISSIONS = 10
-        private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
+        private val REQUIRED_PERMISSIONS = arrayOf(
+            Manifest.permission.CAMERA,
+            Manifest.permission.POST_NOTIFICATIONS
+        )
+    }
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val binder = service as DetectionForegroundService.LocalBinder
+            detectionService = binder.getService()
+            serviceBound = true
+            binder.setPreviewSurfaceProvider(binding.viewFinder.surfaceProvider)
+            updateUIState()
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            detectionService = null
+            serviceBound = false
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -40,22 +53,10 @@ class MainActivity : AppCompatActivity(), YoloDetector.DetectorListener {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        cameraExecutor = Executors.newSingleThreadExecutor()
-
-        yoloDetector = YoloDetector(
-            context = this,
-            modelPath = "yolov8n.tflite",
-            labelPath = "labels.txt",
-            detectorListener = this
-        )
-
-        mqttManager = MqttManager(this)
-        loadMqttSettings()
-
         setupUI()
 
         if (allPermissionsGranted()) {
-            startCamera()
+            bindToService()
         } else {
             ActivityCompat.requestPermissions(
                 this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS
@@ -69,112 +70,49 @@ class MainActivity : AppCompatActivity(), YoloDetector.DetectorListener {
         }
 
         binding.btnToggleDetection.setOnClickListener {
-            isDetecting = !isDetecting
-            binding.btnToggleDetection.text = if (isDetecting) "停止检测" else "开始检测"
-            if (isDetecting) {
-                Toast.makeText(this, "开始人员检测", Toast.LENGTH_SHORT).show()
+            if (isServiceRunning()) {
+                stopDetectionService()
             } else {
-                binding.overlayView.clear()
-                binding.tvPersonCount.text = "人数: 0"
-                binding.tvInferenceTime.text = ""
+                startDetectionService()
             }
         }
     }
 
-    private fun loadMqttSettings() {
-        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-        val broker = prefs.getString("mqtt_broker", "192.168.1.100") ?: "192.168.1.100"
-        val port = prefs.getString("mqtt_port", "1883") ?: "1883"
-        mqttManager.brokerHost = broker
-        mqttManager.brokerPort = port.toIntOrNull() ?: 1883
-        mqttManager.topic = prefs.getString("mqtt_topic", "home/camera/person_count") ?: "home/camera/person_count"
-        mqttManager.username = prefs.getString("mqtt_username", "") ?: ""
-        mqttManager.password = prefs.getString("mqtt_password", "") ?: ""
+    private fun isServiceRunning(): Boolean {
+        return detectionService != null
     }
 
-    private fun startCamera() {
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
-
-        cameraProviderFuture.addListener({
-            cameraProvider = cameraProviderFuture.get()
-
-            val preview = Preview.Builder()
-                .build()
-                .also {
-                    it.setSurfaceProvider(binding.viewFinder.surfaceProvider)
-                }
-
-            imageAnalyzer = ImageAnalysis.Builder()
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
-                .build()
-                .also {
-                    it.setAnalyzer(cameraExecutor) { imageProxy ->
-                        if (isDetecting) {
-                            processImage(imageProxy)
-                        } else {
-                            imageProxy.close()
-                        }
-                    }
-                }
-
-            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-            try {
-                cameraProvider?.unbindAll()
-                cameraProvider?.bindToLifecycle(
-                    this,
-                    cameraSelector,
-                    preview,
-                    imageAnalyzer
-                )
-            } catch (exc: Exception) {
-                Log.e(TAG, "Use case binding failed", exc)
-            }
-
-        }, ContextCompat.getMainExecutor(this))
-    }
-
-    private fun processImage(imageProxy: ImageProxy) {
-        val bitmap = toBitmap(imageProxy)
-        yoloDetector.detect(bitmap)
-        imageProxy.close()
-    }
-
-    private fun toBitmap(imageProxy: ImageProxy): Bitmap {
-        val buffer = imageProxy.planes[0].buffer
-        val pixelStride = imageProxy.planes[0].pixelStride
-        val rowStride = imageProxy.planes[0].rowStride
-        val rowPadding = rowStride - pixelStride * imageProxy.width
-
-        val bitmap = Bitmap.createBitmap(
-            imageProxy.width + rowPadding / pixelStride,
-            imageProxy.height,
-            Bitmap.Config.ARGB_8888
-        )
-        bitmap.copyPixelsFromBuffer(buffer)
-        return bitmap
-    }
-
-    override fun onEmptyDetect() {
-        runOnUiThread {
-            binding.overlayView.clear()
-            binding.tvPersonCount.text = "人数: 0"
-            binding.tvInferenceTime.text = ""
+    private fun startDetectionService() {
+        val intent = Intent(this, DetectionForegroundService::class.java).apply {
+            action = DetectionForegroundService.ACTION_START
         }
-        mqttManager.publishEmptyDetection()
+        ContextCompat.startForegroundService(this, intent)
+        bindToService()
+        Toast.makeText(this, "检测服务已启动", Toast.LENGTH_SHORT).show()
     }
 
-    override fun onDetect(boundingBoxes: List<BoundingBox>, inferenceTime: Long) {
-        val personCount = boundingBoxes.size
-
-        runOnUiThread {
-            binding.tvPersonCount.text = "人数: $personCount"
-            binding.tvInferenceTime.text = "推理: ${inferenceTime}ms"
-            binding.overlayView.setResults(boundingBoxes)
+    private fun stopDetectionService() {
+        val intent = Intent(this, DetectionForegroundService::class.java).apply {
+            action = DetectionForegroundService.ACTION_STOP
         }
+        startService(intent)
+        unbindService(serviceConnection)
+        serviceBound = false
+        detectionService = null
+        updateUIState()
+        Toast.makeText(this, "检测服务已停止", Toast.LENGTH_SHORT).show()
+    }
 
-        mqttManager.publishPersonCount(personCount, boundingBoxes)
+    private fun bindToService() {
+        val intent = Intent(this, DetectionForegroundService::class.java)
+        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+    }
+
+    private fun updateUIState() {
+        val running = isServiceRunning()
+        binding.btnToggleDetection.text = if (running) "停止检测" else "开始检测"
+        binding.tvPersonCount.text = if (running) "服务运行中" else "服务已停止"
+        binding.tvInferenceTime.text = ""
     }
 
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
@@ -189,9 +127,9 @@ class MainActivity : AppCompatActivity(), YoloDetector.DetectorListener {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_CODE_PERMISSIONS) {
             if (allPermissionsGranted()) {
-                startCamera()
+                bindToService()
             } else {
-                Toast.makeText(this, "需要摄像头权限", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "需要摄像头和通知权限", Toast.LENGTH_SHORT).show()
                 finish()
             }
         }
@@ -199,22 +137,19 @@ class MainActivity : AppCompatActivity(), YoloDetector.DetectorListener {
 
     override fun onResume() {
         super.onResume()
-        loadMqttSettings()
-        mqttManager.connect()
-        yoloDetector.setup()
-    }
-
-    override fun onPause() {
-        super.onPause()
-        isDetecting = false
-        binding.btnToggleDetection.text = "开始检测"
+        if (serviceBound) {
+            updateUIState()
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        cameraExecutor.shutdown()
-        yoloDetector.close()
-        mqttManager.cleanup()
+        if (serviceBound) {
+            try {
+                unbindService(serviceConnection)
+            } catch (_: IllegalArgumentException) {
+            }
+        }
         scope.cancel()
     }
 }
