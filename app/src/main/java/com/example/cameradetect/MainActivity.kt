@@ -123,6 +123,10 @@ class MainActivity : AppCompatActivity(), DetectionForegroundService.DetectionCa
             }
         }
 
+        binding.btnSwitchModel.setOnClickListener {
+            showModelSelectionDialog()
+        }
+
         binding.btnSwitchCamera.setOnClickListener {
             showCameraSelectionDialog()
         }
@@ -137,6 +141,27 @@ class MainActivity : AppCompatActivity(), DetectionForegroundService.DetectionCa
 
         binding.rvLogList.layoutManager = LinearLayoutManager(this)
         binding.rvLogList.adapter = logAdapter
+    }
+
+    private fun showModelSelectionDialog() {
+        val models = arrayOf("YOLOv8n (快速检测)", "SSD MobileNet V2 (省电检测)", "DeepLab V3 (像素分割)")
+        val modelFiles = arrayOf("yolov8n.tflite", "ssd_mobilenetv2_fpnlite.tflite", "deeplabv3.tflite")
+
+        val currentModel = serviceBinder?.getCurrentModel() ?: "yolov8n.tflite"
+        val selectedIndex = modelFiles.indexOf(currentModel)
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("选择检测模型")
+            .setSingleChoiceItems(models, selectedIndex) { dialog, which ->
+                val selectedFile = modelFiles[which]
+                serviceBinder?.switchModel(selectedFile)
+                binding.overlayView.clear()
+                binding.tvInferenceTime.text = ""
+                dialog.dismiss()
+                Toast.makeText(this, "已切换到: ${models[which]}", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     private fun showCameraSelectionDialog() {
