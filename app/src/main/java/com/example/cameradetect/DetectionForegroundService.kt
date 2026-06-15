@@ -16,13 +16,15 @@ import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.LifecycleService
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
-class DetectionForegroundService : LifecycleService(), YoloDetector.DetectorListener {
+class DetectionForegroundService : Service(), YoloDetector.DetectorListener, LifecycleOwner {
 
     companion object {
         const val CHANNEL_ID = "camera_detect_channel"
@@ -49,6 +51,10 @@ class DetectionForegroundService : LifecycleService(), YoloDetector.DetectorList
     private var serviceStartTime = 0L
 
     private var previewSurfaceProvider: Preview.SurfaceProvider? = null
+    private lateinit var lifecycleRegistry: LifecycleRegistry
+
+    override val lifecycle: Lifecycle
+        get() = lifecycleRegistry
 
     inner class LocalBinder : Binder() {
         fun getService(): DetectionForegroundService = this@DetectionForegroundService
@@ -59,12 +65,13 @@ class DetectionForegroundService : LifecycleService(), YoloDetector.DetectorList
     }
 
     override fun onBind(intent: Intent): IBinder {
-        super.onBind(intent)
         return binder
     }
 
     override fun onCreate() {
         super.onCreate()
+        lifecycleRegistry = LifecycleRegistry(this)
+        lifecycleRegistry.currentState = Lifecycle.State.CREATED
         cameraExecutor = Executors.newSingleThreadExecutor()
         yoloDetector = YoloDetector(this, "yolov8n.tflite", "labels.txt", this)
         mqttManager = MqttManager(this)
@@ -77,11 +84,10 @@ class DetectionForegroundService : LifecycleService(), YoloDetector.DetectorList
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        super.onStartCommand(intent, flags, startId)
         when (intent?.action) {
             ACTION_STOP -> {
                 stopDetection()
-                stopForeground(true)
+                stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -98,6 +104,7 @@ class DetectionForegroundService : LifecycleService(), YoloDetector.DetectorList
         if (isDetecting) return
         isDetecting = true
         serviceStartTime = System.currentTimeMillis()
+        lifecycleRegistry.currentState = Lifecycle.State.RESUMED
 
         yoloDetector.setup()
         mqttManager.connect()
@@ -110,6 +117,7 @@ class DetectionForegroundService : LifecycleService(), YoloDetector.DetectorList
 
     private fun stopDetection() {
         isDetecting = false
+        lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
         heartbeatJob?.cancel()
         cameraProvider?.unbindAll()
         imageAnalyzer?.clearAnalyzer()
@@ -149,7 +157,12 @@ class DetectionForegroundService : LifecycleService(), YoloDetector.DetectorList
 
             try {
                 cameraProvider?.unbindAll()
-                cameraProvider?.bindToLifecycle(this, cameraSelector, preview, imageAnalyzer)
+                cameraProvider?.bindToLifecycle(
+                    this,
+                    cameraSelector,
+                    preview,
+                    imageAnalyzer
+                )
             } catch (exc: Exception) {
                 Log.e(TAG, "Use case binding failed", exc)
             }
@@ -164,7 +177,12 @@ class DetectionForegroundService : LifecycleService(), YoloDetector.DetectorList
                 }
                 try {
                     provider2.unbindAll()
-                    provider2.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageAnalyzer)
+                    provider2.bindToLifecycle(
+                        this,
+                        CameraSelector.DEFAULT_BACK_CAMERA,
+                        preview,
+                        imageAnalyzer
+                    )
                 } catch (_: Exception) {
                 }
             }
